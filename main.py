@@ -203,13 +203,12 @@ def create_html_chart(data, title, root_path):
                 largeItems.push(["Other", otherSize, false, null]);
             }}
             
-            // Convert to chart format
-            const filteredTotal = largeItems.reduce((sum, item) => sum + item[1], 0);
+            // Convert to chart format - use totalSize instead of filteredTotal for correct percentages
             return largeItems.map(([name, size, isDirectory, path], index) => ({{
                 name: name,
                 size: size,
                 formatted_size: formatSize(size),
-                percentage: (size / filteredTotal) * 100,
+                percentage: (size / totalSize) * 100,
                 color_index: index,
                 is_directory: isDirectory,
                 path: path
