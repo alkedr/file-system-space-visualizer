@@ -102,7 +102,6 @@ def create_bar_chart(data, title):
     output_file = "disk_usage_chart.png"
     plt.savefig(output_file, dpi=150, bbox_inches='tight', pad_inches=0)
     print(f"Chart saved as: {output_file}")
-    plt.show()
 
 
 def main():
