@@ -20,9 +20,9 @@ def scan_directory_recursive(path, max_depth=3, current_depth=0, root_path=None)
                 elif item.is_dir() and not item.is_symlink():
                     # For max depth, just get the immediate directory size, don't recurse
                     size += sum(f.stat().st_size for f in item.rglob('*') if f.is_file() and not f.is_symlink())
-            return {'size': size, 'path': str(path.relative_to(root_path)), 'children': []}
+            return {'size': size, 'path': str(path.relative_to(root_path))}
         except (PermissionError, OSError):
-            return {'size': 0, 'path': str(path.relative_to(root_path)), 'children': []}
+            return {'size': 0, 'path': str(path.relative_to(root_path))}
     
     items = []
     total_size = 0
@@ -34,8 +34,7 @@ def scan_directory_recursive(path, max_depth=3, current_depth=0, root_path=None)
                 items.append({
                     'name': item.name,
                     'size': file_size,
-                    'path': str(item.relative_to(root_path)),
-                    'children': []
+                    'path': str(item.relative_to(root_path))
                 })
                 total_size += file_size
             elif item.is_dir() and not item.is_symlink():
@@ -60,19 +59,20 @@ def scan_directory_recursive(path, max_depth=3, current_depth=0, root_path=None)
             large_items.append({
                 'name': 'Other',
                 'size': other_size,
-                'path': None,
-                'children': []
+                'path': None
             })
         
         children = large_items
     else:
         children = items
     
-    return {
+    result = {
         'size': total_size,
-        'path': str(path.relative_to(root_path)),
-        'children': children
+        'path': str(path.relative_to(root_path))
     }
+    if children:
+        result['children'] = children
+    return result
 
 def scan_directory(path):
     """Scan directory and return immediate children (for compatibility)."""
@@ -293,7 +293,7 @@ def create_html_chart(data, title, root_path):
                 return tree;
             }}
             
-            for (const child of tree.children) {{
+            for (const child of tree.children || []) {{
                 if (child.children && child.children.length > 0) {{
                     const found = findDirectoryInTree(child, targetPath);
                     if (found) return found;
