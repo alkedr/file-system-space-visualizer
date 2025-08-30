@@ -2,7 +2,7 @@
 
 import argparse
 from pathlib import Path
-import matplotlib.pyplot as plt
+import json
 
 
 def scan_directory(path):
@@ -31,8 +31,8 @@ def format_size(bytes):
     return f"{bytes:.1f} PB"
 
 
-def create_bar_chart(data, title):
-    """Generate and display horizontal bar chart with row heights proportional to size."""
+def create_html_chart(data, title):
+    """Generate HTML chart with embedded JavaScript."""
     if not data:
         print("No data to display")
         return
@@ -54,53 +54,131 @@ def create_bar_chart(data, title):
     else:
         filtered_data = large_items
     
-    # Reverse order so largest items appear at top
-    filtered_data = filtered_data[::-1]
+    # Keep original order so largest items appear at top
+    # (HTML stacks from top to bottom, so no reversal needed)
     
-    names, sizes = zip(*filtered_data) if filtered_data else ([], [])
+    # Prepare data for JavaScript
+    chart_data = []
+    total_size = sum(size for _, size in filtered_data)
     
-    # Calculate proportional heights
-    total_size = sum(sizes)
-    proportions = [size / total_size for size in sizes]
+    for i, (name, size) in enumerate(filtered_data):
+        percentage = (size / total_size) * 100
+        chart_data.append({
+            'name': name,
+            'size': size,
+            'formatted_size': format_size(size),
+            'percentage': percentage,
+            'color_index': i
+        })
     
-    # Create figure with height proportional to number of items
-    fig, ax = plt.subplots(figsize=(12, max(8, len(names) * 0.5)))
-    
-    # Create horizontal bars with heights proportional to size
-    y_positions = []
-    current_y = 0
-    for i, prop in enumerate(proportions):
-        height = prop * 10  # Scale factor for visibility
-        y_positions.append(current_y + height / 2)
+    # Generate HTML
+    html_content = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Disk Space Usage: {title}</title>
+    <style>
+        body {{
+            margin: 0;
+            padding: 0;
+            font-family: Arial, sans-serif;
+            background-color: white;
+        }}
         
-        # Create bar
-        ax.barh(current_y + height / 2, 1, height=height, 
-                label=f"{names[i]} ({format_size(sizes[i])}) - {prop*100:.1f}%")
+        .title {{
+            text-align: center;
+            font-size: 14px;
+            font-weight: bold;
+            padding: 10px 0;
+            margin: 0;
+        }}
         
-        # Add text label
-        ax.text(0.02, current_y + height / 2, 
-                f"{prop*100:.1f}% ({format_size(sizes[i])}) - {names[i]}",
-                va='center', ha='left', fontsize=10, weight='bold')
+        .chart-container {{
+            width: 100%;
+            height: calc(100vh - 50px);
+            position: relative;
+        }}
         
-        current_y += height
+        .bar {{
+            width: 100%;
+            position: relative;
+            display: flex;
+            align-items: center;
+            overflow: hidden;
+        }}
+        
+        .bar-text {{
+            position: absolute;
+            left: 2%;
+            font-size: 10px;
+            font-weight: bold;
+            color: black;
+            z-index: 10;
+            white-space: nowrap;
+        }}
+    </style>
+</head>
+<body>
+    <h1 class="title">Disk Space Usage: {title}</h1>
+    <div class="chart-container" id="chart-container"></div>
     
-    ax.set_xlim(0, 1)
-    ax.set_ylim(0, current_y)
-    ax.set_title(f"Disk Space Usage: {title}", fontsize=14, weight='bold')
+    <script>
+        const data = {json.dumps(chart_data)};
+        
+        function generateColor(index) {{
+            // Matplotlib's tab10 color palette
+            const tab10Colors = [
+                '#1f77b4',  // blue
+                '#ff7f0e',  // orange
+                '#2ca02c',  // green
+                '#d62728',  // red
+                '#9467bd',  // purple
+                '#8c564b',  // brown
+                '#e377c2',  // pink
+                '#7f7f7f',  // gray
+                '#bcbd22',  // olive
+                '#17becf'   // cyan
+            ];
+            return tab10Colors[index % tab10Colors.length];
+        }}
+        
+        function renderChart() {{
+            const container = document.getElementById('chart-container');
+            const containerHeight = container.clientHeight;
+            
+            data.forEach((item, index) => {{
+                const bar = document.createElement('div');
+                bar.className = 'bar';
+                
+                const heightPercent = item.percentage;
+                const height = (heightPercent / 100) * containerHeight;
+                
+                bar.style.height = height + 'px';
+                bar.style.backgroundColor = generateColor(item.color_index);
+                
+                const text = document.createElement('div');
+                text.className = 'bar-text';
+                text.textContent = `${{item.percentage.toFixed(1)}}% (${{item.formatted_size}}) - ${{item.name}}`;
+                
+                bar.appendChild(text);
+                container.appendChild(bar);
+            }});
+        }}
+        
+        // Render chart when page loads
+        window.addEventListener('load', renderChart);
+        window.addEventListener('resize', () => {{
+            document.getElementById('chart-container').innerHTML = '';
+            renderChart();
+        }});
+    </script>
+</body>
+</html>"""
     
-    # Remove y-axis ticks and labels
-    ax.set_yticks([])
-    ax.set_xticks([])
-    
-    # Remove spines for cleaner look
-    for spine in ax.spines.values():
-        spine.set_visible(False)
-    
-    # Remove margins
-    plt.subplots_adjust(left=0, right=1, bottom=0, top=0.95)
-    
-    output_file = "disk_usage_chart.png"
-    plt.savefig(output_file, dpi=150, bbox_inches='tight', pad_inches=0)
+    output_file = "disk_usage_chart.html"
+    with open(output_file, 'w', encoding='utf-8') as f:
+        f.write(html_content)
     print(f"Chart saved as: {output_file}")
 
 
@@ -127,7 +205,7 @@ def main():
         print("No accessible files or directories found")
         return 1
     
-    create_bar_chart(data, str(path))
+    create_html_chart(data, str(path))
     return 0
 
 
