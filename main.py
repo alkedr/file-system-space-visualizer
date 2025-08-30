@@ -5,8 +5,11 @@ from pathlib import Path
 import json
 
 
-def scan_directory_recursive(path, max_depth=3, current_depth=0):
+def scan_directory_recursive(path, max_depth=3, current_depth=0, root_path=None):
     """Recursively scan directory tree and return complete structure."""
+    if root_path is None:
+        root_path = path
+    
     if current_depth >= max_depth:
         # Just return size for very deep directories - avoid rglob to prevent double counting
         try:
@@ -17,9 +20,9 @@ def scan_directory_recursive(path, max_depth=3, current_depth=0):
                 elif item.is_dir() and not item.is_symlink():
                     # For max depth, just get the immediate directory size, don't recurse
                     size += sum(f.stat().st_size for f in item.rglob('*') if f.is_file() and not f.is_symlink())
-            return {'size': size, 'path': str(path), 'children': []}
+            return {'size': size, 'path': str(path.relative_to(root_path)), 'children': []}
         except (PermissionError, OSError):
-            return {'size': 0, 'path': str(path), 'children': []}
+            return {'size': 0, 'path': str(path.relative_to(root_path)), 'children': []}
     
     items = []
     total_size = 0
@@ -31,13 +34,13 @@ def scan_directory_recursive(path, max_depth=3, current_depth=0):
                 items.append({
                     'name': item.name,
                     'size': file_size,
-                    'path': str(item),
+                    'path': str(item.relative_to(root_path)),
                     'children': []
                 })
                 total_size += file_size
             elif item.is_dir() and not item.is_symlink():
                 # Recursively scan subdirectory
-                subdir_data = scan_directory_recursive(item, max_depth, current_depth + 1)
+                subdir_data = scan_directory_recursive(item, max_depth, current_depth + 1, root_path)
                 subdir_data['name'] = item.name
                 items.append(subdir_data)
                 total_size += subdir_data['size']
@@ -67,7 +70,7 @@ def scan_directory_recursive(path, max_depth=3, current_depth=0):
     
     return {
         'size': total_size,
-        'path': str(path),
+        'path': str(path.relative_to(root_path)),
         'children': children
     }
 
@@ -190,8 +193,9 @@ def create_html_chart(data, title, root_path):
     
     <script>
         const completeTree = {json.dumps(complete_tree)};
-        let currentPath = '{title}';
-        let navigationHistory = ['{title}'];
+        const rootPath = '{title}';
+        let currentPath = '.';
+        let navigationHistory = ['.'];
         function generateColor(index) {{
             // Bootstrap table-striped colors (alternating white and light gray)
             return index % 2 === 0 ? '#ffffff' : '#f8f9fa';
@@ -226,7 +230,8 @@ def create_html_chart(data, title, root_path):
                 
                 const item = document.createElement('span');
                 item.className = 'breadcrumb-item';
-                item.textContent = index === 0 ? path.split('/').pop() || path : path.split('/').pop();
+                const displayPath = path === '.' ? rootPath : rootPath + '/' + path;
+                item.textContent = index === 0 ? displayPath.split('/').pop() || displayPath : path.split('/').pop() || path;
                 item.onclick = () => navigateToHistoryIndex(index);
                 breadcrumbDiv.appendChild(item);
             }});
@@ -244,7 +249,8 @@ def create_html_chart(data, title, root_path):
                     renderChart();
                 }}
                 
-                document.getElementById('current-path').textContent = currentPath;
+                const displayPath = currentPath === '.' ? rootPath : rootPath + '/' + currentPath;
+                document.getElementById('current-path').textContent = displayPath;
                 updateBreadcrumb();
                 
                 // Update browser history
@@ -313,7 +319,8 @@ def create_html_chart(data, title, root_path):
             currentPath = path;
             
             // Update display
-            document.getElementById('current-path').textContent = path;
+            const displayPath = path === '.' ? rootPath : rootPath + '/' + path;
+            document.getElementById('current-path').textContent = displayPath;
             updateBreadcrumb();
             
             // Update chart data
@@ -336,15 +343,16 @@ def create_html_chart(data, title, root_path):
                     currentPath = targetPath;
                     
                     // Rebuild navigation history up to this point
-                    navigationHistory = ['{title}'];
-                    if (targetPath !== '{title}') {{
+                    navigationHistory = ['.'];
+                    if (targetPath !== '.') {{
                         // For simplicity, just add the target path
                         // In a more sophisticated implementation, we'd rebuild the full path
                         navigationHistory.push(targetPath);
                     }}
                     
                     // Update display
-                    document.getElementById('current-path').textContent = targetPath;
+                    const displayPath = targetPath === '.' ? rootPath : rootPath + '/' + targetPath;
+                    document.getElementById('current-path').textContent = displayPath;
                     updateBreadcrumb();
                     currentData = directoryData.children || [];
                     renderChart();
@@ -361,11 +369,12 @@ def create_html_chart(data, title, root_path):
                 const directoryData = findDirectoryInTree(completeTree, initialPath);
                 if (directoryData) {{
                     currentPath = initialPath;
-                    navigationHistory = ['{title}'];
-                    if (initialPath !== '{title}') {{
+                    navigationHistory = ['.'];
+                    if (initialPath !== '.') {{
                         navigationHistory.push(initialPath);
                     }}
-                    document.getElementById('current-path').textContent = initialPath;
+                    const displayPath = initialPath === '.' ? rootPath : rootPath + '/' + initialPath;
+                    document.getElementById('current-path').textContent = displayPath;
                     currentData = directoryData.children || [];
                 }}
             }}
