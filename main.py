@@ -5,21 +5,49 @@ from pathlib import Path
 import json
 
 
-def scan_directory(path):
-    """Scan directory and return sizes of immediate children."""
+def scan_directory_recursive(path, max_depth=3, current_depth=0):
+    """Recursively scan directory tree and return complete structure."""
+    if current_depth >= max_depth:
+        # Just return size for very deep directories
+        try:
+            size = sum(f.stat().st_size for f in path.rglob('*') if f.is_file())
+            return {'size': size, 'is_directory': True, 'path': str(path), 'children': {}}
+        except (PermissionError, OSError):
+            return {'size': 0, 'is_directory': True, 'path': str(path), 'children': {}}
+    
     data = {}
+    total_size = 0
     
     for item in path.iterdir():
         try:
             if item.is_file():
-                data[item.name] = item.stat().st_size
+                file_size = item.stat().st_size
+                data[item.name] = {
+                    'size': file_size,
+                    'is_directory': False,
+                    'path': str(item),
+                    'children': {}
+                }
+                total_size += file_size
             elif item.is_dir():
-                size = sum(f.stat().st_size for f in item.rglob('*') if f.is_file())
-                data[item.name] = size
+                # Recursively scan subdirectory
+                subdir_data = scan_directory_recursive(item, max_depth, current_depth + 1)
+                data[item.name] = subdir_data
+                total_size += subdir_data['size']
         except (PermissionError, OSError):
             continue
     
-    return data
+    return {
+        'size': total_size,
+        'is_directory': True,
+        'path': str(path),
+        'children': data
+    }
+
+def scan_directory(path):
+    """Scan directory and return immediate children (for compatibility)."""
+    tree = scan_directory_recursive(path, max_depth=1)
+    return tree['children']
 
 
 def format_size(bytes):
@@ -31,44 +59,45 @@ def format_size(bytes):
     return f"{bytes:.1f} PB"
 
 
-def create_html_chart(data, title):
-    """Generate HTML chart with embedded JavaScript."""
+def create_html_chart(data, title, root_path):
+    """Generate HTML chart with embedded JavaScript and full directory tree."""
     if not data:
         print("No data to display")
         return
     
-    names = list(data.keys())
-    sizes = list(data.values())
+    # Get complete directory tree
+    complete_tree = scan_directory_recursive(Path(root_path))
+    
+    # Process current level data for initial display
+    items = [(name, info['size'], info['is_directory'], info['path']) 
+             for name, info in data.items()]
     
     # Sort by size (largest first)
-    sorted_data = sorted(zip(names, sizes), key=lambda x: x[1], reverse=True)
+    sorted_items = sorted(items, key=lambda x: x[1], reverse=True)
     
     # Filter out very small items (less than 1% of total)
-    total = sum(sizes)
-    large_items = [(name, size) for name, size in sorted_data if size > total * 0.01]
+    total_size = sum(item[1] for item in sorted_items)
+    large_items = [item for item in sorted_items if item[1] > total_size * 0.01]
     
-    if len(large_items) < len(sorted_data):
-        other_size = sum(size for name, size in sorted_data if size <= total * 0.01)
+    if len(large_items) < len(sorted_items):
+        other_size = sum(item[1] for item in sorted_items if item[1] <= total_size * 0.01)
         # Put "Other" at the end (bottom of chart)
-        filtered_data = large_items + [("Other", other_size)]
-    else:
-        filtered_data = large_items
+        large_items.append(("Other", other_size, False, None))
     
-    # Keep original order so largest items appear at top
-    # (HTML stacks from top to bottom, so no reversal needed)
-    
-    # Prepare data for JavaScript
+    # Prepare initial chart data for JavaScript
     chart_data = []
-    total_size = sum(size for _, size in filtered_data)
+    filtered_total = sum(item[1] for item in large_items)
     
-    for i, (name, size) in enumerate(filtered_data):
-        percentage = (size / total_size) * 100
+    for i, (name, size, is_directory, path) in enumerate(large_items):
+        percentage = (size / filtered_total) * 100
         chart_data.append({
             'name': name,
             'size': size,
             'formatted_size': format_size(size),
             'percentage': percentage,
-            'color_index': i
+            'color_index': i,
+            'is_directory': is_directory,
+            'path': path
         })
     
     # Generate HTML
@@ -108,6 +137,14 @@ def create_html_chart(data, title):
             overflow: hidden;
         }}
         
+        .bar.clickable {{
+            cursor: pointer;
+        }}
+        
+        .bar.clickable:hover {{
+            background-color: #e2e6ea !important;
+        }}
+        
         .bar-text {{
             position: absolute;
             left: 2%;
@@ -117,45 +154,104 @@ def create_html_chart(data, title):
             z-index: 10;
             white-space: nowrap;
         }}
+        
+        .breadcrumb {{
+            background-color: #f0f0f0;
+            padding: 10px;
+            font-size: 12px;
+            border-bottom: 1px solid #ddd;
+        }}
+        
+        .breadcrumb-item {{
+            display: inline-block;
+            margin-right: 5px;
+            cursor: pointer;
+            color: #007bff;
+            text-decoration: underline;
+        }}
+        
+        .breadcrumb-item:hover {{
+            color: #0056b3;
+        }}
+        
+        .breadcrumb-separator {{
+            margin: 0 5px;
+            color: #666;
+        }}
     </style>
 </head>
 <body>
-    <h1 class="title">Disk Space Usage: {title}</h1>
+    <h1 class="title">Disk Space Usage: <span id="current-path">{title}</span></h1>
+    <div class="breadcrumb" id="breadcrumb"></div>
     <div class="chart-container" id="chart-container"></div>
     
     <script>
-        const data = {json.dumps(chart_data)};
+        const completeTree = {json.dumps(complete_tree)};
+        let currentData = {json.dumps(chart_data)};
+        let currentPath = '{title}';
+        let navigationHistory = ['{title}'];
         
         function generateColor(index) {{
-            // Matplotlib's tab10 color palette
-            const tab10Colors = [
-                '#1f77b4',  // blue
-                '#ff7f0e',  // orange
-                '#2ca02c',  // green
-                '#d62728',  // red
-                '#9467bd',  // purple
-                '#8c564b',  // brown
-                '#e377c2',  // pink
-                '#7f7f7f',  // gray
-                '#bcbd22',  // olive
-                '#17becf'   // cyan
-            ];
-            return tab10Colors[index % tab10Colors.length];
+            // Bootstrap table-striped colors (alternating white and light gray)
+            return index % 2 === 0 ? '#ffffff' : '#f8f9fa';
+        }}
+        
+        function updateBreadcrumb() {{
+            const breadcrumbDiv = document.getElementById('breadcrumb');
+            breadcrumbDiv.innerHTML = '';
+            
+            navigationHistory.forEach((path, index) => {{
+                if (index > 0) {{
+                    const separator = document.createElement('span');
+                    separator.className = 'breadcrumb-separator';
+                    separator.textContent = '/';
+                    breadcrumbDiv.appendChild(separator);
+                }}
+                
+                const item = document.createElement('span');
+                item.className = 'breadcrumb-item';
+                item.textContent = index === 0 ? path.split('/').pop() || path : path.split('/').pop();
+                item.onclick = () => navigateToHistoryIndex(index);
+                breadcrumbDiv.appendChild(item);
+            }});
+        }}
+        
+        function navigateToHistoryIndex(index) {{
+            if (index < navigationHistory.length - 1) {{
+                navigationHistory = navigationHistory.slice(0, index + 1);
+                currentPath = navigationHistory[index];
+                
+                // Find directory in tree and update chart
+                const directoryData = findDirectoryInTree(completeTree, currentPath);
+                if (directoryData) {{
+                    currentData = prepareChartData(directoryData);
+                    renderChart();
+                }}
+                
+                document.getElementById('current-path').textContent = currentPath;
+                updateBreadcrumb();
+            }}
         }}
         
         function renderChart() {{
             const container = document.getElementById('chart-container');
             const containerHeight = container.clientHeight;
+            container.innerHTML = '';
             
-            data.forEach((item, index) => {{
+            currentData.forEach((item, index) => {{
                 const bar = document.createElement('div');
-                bar.className = 'bar';
+                bar.className = 'bar' + (item.is_directory ? ' clickable' : '');
                 
                 const heightPercent = item.percentage;
                 const height = (heightPercent / 100) * containerHeight;
                 
                 bar.style.height = height + 'px';
                 bar.style.backgroundColor = generateColor(item.color_index);
+                
+                // Add click handler for directories
+                if (item.is_directory && item.path) {{
+                    bar.onclick = () => navigateToDirectory(item.path, item.name);
+                }}
                 
                 const text = document.createElement('div');
                 text.className = 'bar-text';
@@ -166,10 +262,98 @@ def create_html_chart(data, title):
             }});
         }}
         
-        // Render chart when page loads
-        window.addEventListener('load', renderChart);
+        function findDirectoryInTree(tree, targetPath) {{
+            if (tree.path === targetPath) {{
+                return tree;
+            }}
+            
+            for (const [name, child] of Object.entries(tree.children)) {{
+                if (child.is_directory) {{
+                    const found = findDirectoryInTree(child, targetPath);
+                    if (found) return found;
+                }}
+            }}
+            return null;
+        }}
+        
+        function prepareChartData(directoryData) {{
+            if (!directoryData || !directoryData.children) return [];
+            
+            const items = Object.entries(directoryData.children).map(([name, info]) => ([
+                name, info.size, info.is_directory, info.path
+            ]));
+            
+            // Sort by size (largest first)
+            const sortedItems = items.sort((a, b) => b[1] - a[1]);
+            
+            // Filter out very small items (less than 1% of total)
+            const totalSize = sortedItems.reduce((sum, item) => sum + item[1], 0);
+            const largeItems = sortedItems.filter(item => item[1] > totalSize * 0.01);
+            
+            if (largeItems.length < sortedItems.length) {{
+                const otherSize = sortedItems
+                    .filter(item => item[1] <= totalSize * 0.01)
+                    .reduce((sum, item) => sum + item[1], 0);
+                largeItems.push(["Other", otherSize, false, null]);
+            }}
+            
+            // Convert to chart format
+            const filteredTotal = largeItems.reduce((sum, item) => sum + item[1], 0);
+            return largeItems.map(([name, size, isDirectory, path], index) => ({{
+                name: name,
+                size: size,
+                formatted_size: formatSize(size),
+                percentage: (size / filteredTotal) * 100,
+                color_index: index,
+                is_directory: isDirectory,
+                path: path
+            }}));
+        }}
+        
+        function formatSize(bytes) {{
+            const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+            let size = bytes;
+            let unitIndex = 0;
+            
+            while (size >= 1024 && unitIndex < units.length - 1) {{
+                size /= 1024;
+                unitIndex++;
+            }}
+            
+            return `${{size.toFixed(1)}} ${{units[unitIndex]}}`;
+        }}
+        
+        function navigateToDirectory(path, name) {{
+            console.log('Navigating to:', path);
+            
+            // Find directory in embedded tree
+            const directoryData = findDirectoryInTree(completeTree, path);
+            
+            if (!directoryData) {{
+                alert(`Directory not found: ${{path}}`);
+                return;
+            }}
+            
+            // Add to navigation history
+            navigationHistory.push(path);
+            currentPath = path;
+            
+            // Update display
+            document.getElementById('current-path').textContent = path;
+            updateBreadcrumb();
+            
+            // Update chart data
+            currentData = prepareChartData(directoryData);
+            renderChart();
+        }}
+        
+        // Initial render
+        window.addEventListener('load', () => {{
+            updateBreadcrumb();
+            renderChart();
+        }});
+        
         window.addEventListener('resize', () => {{
-            document.getElementById('chart-container').innerHTML = '';
             renderChart();
         }});
     </script>
@@ -205,7 +389,7 @@ def main():
         print("No accessible files or directories found")
         return 1
     
-    create_html_chart(data, str(path))
+    create_html_chart(data, str(path), str(path))
     return 0
 
 
