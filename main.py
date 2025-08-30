@@ -5,24 +5,10 @@ from pathlib import Path
 import json
 
 
-def scan_directory_recursive(path, max_depth=3, current_depth=0, root_path=None):
+def scan_directory_recursive(path, root_path=None, root_total_size=None):
     """Recursively scan directory tree and return complete structure."""
     if root_path is None:
         root_path = path
-    
-    if current_depth >= max_depth:
-        # Just return size for very deep directories - avoid rglob to prevent double counting
-        try:
-            size = 0
-            for item in path.iterdir():
-                if item.is_file() and not item.is_symlink():
-                    size += item.stat().st_size
-                elif item.is_dir() and not item.is_symlink():
-                    # For max depth, just get the immediate directory size, don't recurse
-                    size += sum(f.stat().st_size for f in item.rglob('*') if f.is_file() and not f.is_symlink())
-            return {'size': size}
-        except (PermissionError, OSError):
-            return {'size': 0}
     
     items = []
     total_size = 0
@@ -38,7 +24,7 @@ def scan_directory_recursive(path, max_depth=3, current_depth=0, root_path=None)
                 total_size += file_size
             elif item.is_dir() and not item.is_symlink():
                 # Recursively scan subdirectory
-                subdir_data = scan_directory_recursive(item, max_depth, current_depth + 1, root_path)
+                subdir_data = scan_directory_recursive(item, root_path, root_total_size)
                 subdir_data['name'] = item.name
                 items.append(subdir_data)
                 total_size += subdir_data['size']
@@ -47,6 +33,10 @@ def scan_directory_recursive(path, max_depth=3, current_depth=0, root_path=None)
     
     # Sort by size (largest first)
     items.sort(key=lambda x: x['size'], reverse=True)
+    
+    # If this is the root call, calculate root_total_size
+    if root_total_size is None:
+        root_total_size = total_size
     
     # Filter out very small items (less than 1% of total) and group into "Other"
     if total_size > 0:
@@ -67,15 +57,20 @@ def scan_directory_recursive(path, max_depth=3, current_depth=0, root_path=None)
     result = {
         'size': total_size
     }
-    if children:
+    
+    # Only add children if:
+    # 1. There are children, AND
+    # 2. This directory is >= 1% of root size (or this IS the root)
+    if children and (path == root_path or total_size >= root_total_size * 0.01):
         result['children'] = children
+    
     return result
 
 def scan_directory(path):
     """Scan directory and return immediate children (for compatibility)."""
-    tree = scan_directory_recursive(path, max_depth=1)
+    tree = scan_directory_recursive(path)
     # Convert list back to dict for backward compatibility
-    return {item['name']: item for item in tree['children']}
+    return {item['name']: item for item in tree.get('children', [])}
 
 
 def format_size(bytes):
