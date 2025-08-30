@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a Python CLI tool that analyzes disk space usage for a given directory and produces a visual pie chart representation. The tool helps users quickly understand which subdirectories or files are consuming the most space.
+This is a Python CLI tool that analyzes disk space usage for a given directory and produces a visual bar chart representation. The tool displays files and directories as horizontal bars with heights proportional to their disk usage, making it easy to identify space-consuming items.
 
 ## Technology Stack
 
@@ -16,39 +16,40 @@ This is a Python CLI tool that analyzes disk space usage for a given directory a
 
 ## Architecture
 
-The CLI tool should be structured with:
+The CLI tool is structured with:
 
-- Main CLI entry point with argument parsing
-- Directory scanning and size calculation module
-- Data processing for chart generation
-- Visualization rendering module
-- Output handling (display/save chart)
+- **main.py**: Main CLI entry point with argument parsing
+- **scan_directory()**: Directory scanning and size calculation using pathlib
+- **create_bar_chart()**: Proportional bar chart generation with matplotlib
+- **format_size()**: Human-readable size formatting
+- Error handling for invalid paths and permissions
 
 ## Development Commands
 
-Commands will be established once the Python project structure is set up:
+- `./run.sh main.py <directory>` - Run the tool (creates venv if needed)
+- `./run.sh main.py --help` - Show help
+- Example: `./run.sh main.py ~/Downloads`
 
-- `python -m pip install -e .` - Install in development mode
-- `python -m pytest` - Run tests
-- `python -m flake8` or `ruff` - Linting
-- `python -m mypy` - Type checking
+The `run.sh` script automatically:
+- Creates virtual environment if it doesn't exist
+- Installs dependencies from requirements.txt
+- Runs the tool with the venv Python
 
 ## Core Functionality
 
-The tool should:
+The tool:
 
-1. Accept a directory path as command line argument
-2. Recursively scan the directory to calculate sizes
-3. Aggregate data for visualization
-4. Generate a pie chart showing space distribution
-5. Display or save the chart based on user options
+1. Accepts a directory path as command line argument
+2. Recursively scans the directory to calculate sizes
+3. Sorts items by size (largest first)
+4. Filters out items smaller than 1% (aggregated as "Other")
+5. Generates a horizontal bar chart with heights proportional to disk usage
+6. Saves chart as `disk_usage_chart.png`
+7. Displays format: `percent% (size) - filename`
 
-## Getting Started
+## Output Format
 
-Initial development steps:
-
-1. Set up Python project structure (pyproject.toml/setup.py)
-2. Implement directory scanning functionality
-3. Add command line interface
-4. Integrate chart generation library
-5. Add tests and documentation
+- **Visualization**: Horizontal bars with proportional heights
+- **Text Format**: `6.1% (30.1 GB) - filename`
+- **Sorting**: Largest items at top, "Other" at bottom
+- **File**: Saves as `disk_usage_chart.png` in current directory
