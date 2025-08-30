@@ -68,38 +68,6 @@ def create_html_chart(data, title, root_path):
     # Get complete directory tree
     complete_tree = scan_directory_recursive(Path(root_path))
     
-    # Process current level data for initial display
-    items = [(name, info['size'], info['is_directory'], info['path']) 
-             for name, info in data.items()]
-    
-    # Sort by size (largest first)
-    sorted_items = sorted(items, key=lambda x: x[1], reverse=True)
-    
-    # Filter out very small items (less than 1% of total)
-    total_size = sum(item[1] for item in sorted_items)
-    large_items = [item for item in sorted_items if item[1] > total_size * 0.01]
-    
-    if len(large_items) < len(sorted_items):
-        other_size = sum(item[1] for item in sorted_items if item[1] <= total_size * 0.01)
-        # Put "Other" at the end (bottom of chart)
-        large_items.append(("Other", other_size, False, None))
-    
-    # Prepare initial chart data for JavaScript
-    chart_data = []
-    filtered_total = sum(item[1] for item in large_items)
-    
-    for i, (name, size, is_directory, path) in enumerate(large_items):
-        percentage = (size / filtered_total) * 100
-        chart_data.append({
-            'name': name,
-            'size': size,
-            'formatted_size': format_size(size),
-            'percentage': percentage,
-            'color_index': i,
-            'is_directory': is_directory,
-            'path': path
-        })
-    
     # Generate HTML
     html_content = f"""<!DOCTYPE html>
 <html lang="en">
@@ -194,14 +162,61 @@ def create_html_chart(data, title, root_path):
     
     <script>
         const completeTree = {json.dumps(complete_tree)};
-        let currentData = {json.dumps(chart_data)};
         let currentPath = '{title}';
         let navigationHistory = ['{title}'];
-        
         function generateColor(index) {{
             // Bootstrap table-striped colors (alternating white and light gray)
             return index % 2 === 0 ? '#ffffff' : '#f8f9fa';
         }}
+        
+        function formatSize(bytes) {{
+            const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+            let size = bytes;
+            let unitIndex = 0;
+            
+            while (size >= 1024 && unitIndex < units.length - 1) {{
+                size /= 1024;
+                unitIndex++;
+            }}
+            
+            return `${{size.toFixed(1)}} ${{units[unitIndex]}}`;
+        }}
+        
+        function prepareChartData(directoryData) {{
+            if (!directoryData || !directoryData.children) return [];
+            
+            const items = Object.entries(directoryData.children).map(([name, info]) => ([
+                name, info.size, info.is_directory, info.path
+            ]));
+            
+            // Sort by size (largest first)
+            const sortedItems = items.sort((a, b) => b[1] - a[1]);
+            
+            // Filter out very small items (less than 1% of total)
+            const totalSize = sortedItems.reduce((sum, item) => sum + item[1], 0);
+            const largeItems = sortedItems.filter(item => item[1] > totalSize * 0.01);
+            
+            if (largeItems.length < sortedItems.length) {{
+                const otherSize = sortedItems
+                    .filter(item => item[1] <= totalSize * 0.01)
+                    .reduce((sum, item) => sum + item[1], 0);
+                largeItems.push(["Other", otherSize, false, null]);
+            }}
+            
+            // Convert to chart format
+            const filteredTotal = largeItems.reduce((sum, item) => sum + item[1], 0);
+            return largeItems.map(([name, size, isDirectory, path], index) => ({{
+                name: name,
+                size: size,
+                formatted_size: formatSize(size),
+                percentage: (size / filteredTotal) * 100,
+                color_index: index,
+                is_directory: isDirectory,
+                path: path
+            }}));
+        }}
+        
+        let currentData = prepareChartData(completeTree);
         
         function updateBreadcrumb() {{
             const breadcrumbDiv = document.getElementById('breadcrumb');
@@ -283,52 +298,6 @@ def create_html_chart(data, title, root_path):
             return null;
         }}
         
-        function prepareChartData(directoryData) {{
-            if (!directoryData || !directoryData.children) return [];
-            
-            const items = Object.entries(directoryData.children).map(([name, info]) => ([
-                name, info.size, info.is_directory, info.path
-            ]));
-            
-            // Sort by size (largest first)
-            const sortedItems = items.sort((a, b) => b[1] - a[1]);
-            
-            // Filter out very small items (less than 1% of total)
-            const totalSize = sortedItems.reduce((sum, item) => sum + item[1], 0);
-            const largeItems = sortedItems.filter(item => item[1] > totalSize * 0.01);
-            
-            if (largeItems.length < sortedItems.length) {{
-                const otherSize = sortedItems
-                    .filter(item => item[1] <= totalSize * 0.01)
-                    .reduce((sum, item) => sum + item[1], 0);
-                largeItems.push(["Other", otherSize, false, null]);
-            }}
-            
-            // Convert to chart format
-            const filteredTotal = largeItems.reduce((sum, item) => sum + item[1], 0);
-            return largeItems.map(([name, size, isDirectory, path], index) => ({{
-                name: name,
-                size: size,
-                formatted_size: formatSize(size),
-                percentage: (size / filteredTotal) * 100,
-                color_index: index,
-                is_directory: isDirectory,
-                path: path
-            }}));
-        }}
-        
-        function formatSize(bytes) {{
-            const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-            let size = bytes;
-            let unitIndex = 0;
-            
-            while (size >= 1024 && unitIndex < units.length - 1) {{
-                size /= 1024;
-                unitIndex++;
-            }}
-            
-            return `${{size.toFixed(1)}} ${{units[unitIndex]}}`;
-        }}
         
         function navigateToDirectory(path, name) {{
             console.log('Navigating to:', path);
