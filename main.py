@@ -20,9 +20,9 @@ def scan_directory_recursive(path, max_depth=3, current_depth=0, root_path=None)
                 elif item.is_dir() and not item.is_symlink():
                     # For max depth, just get the immediate directory size, don't recurse
                     size += sum(f.stat().st_size for f in item.rglob('*') if f.is_file() and not f.is_symlink())
-            return {'size': size, 'path': str(path.relative_to(root_path))}
+            return {'size': size}
         except (PermissionError, OSError):
-            return {'size': 0, 'path': str(path.relative_to(root_path))}
+            return {'size': 0}
     
     items = []
     total_size = 0
@@ -33,8 +33,7 @@ def scan_directory_recursive(path, max_depth=3, current_depth=0, root_path=None)
                 file_size = item.stat().st_size
                 items.append({
                     'name': item.name,
-                    'size': file_size,
-                    'path': str(item.relative_to(root_path))
+                    'size': file_size
                 })
                 total_size += file_size
             elif item.is_dir() and not item.is_symlink():
@@ -58,8 +57,7 @@ def scan_directory_recursive(path, max_depth=3, current_depth=0, root_path=None)
             other_size = sum(item['size'] for item in small_items)
             large_items.append({
                 'name': 'Other',
-                'size': other_size,
-                'path': None
+                'size': other_size
             })
         
         children = large_items
@@ -67,8 +65,7 @@ def scan_directory_recursive(path, max_depth=3, current_depth=0, root_path=None)
         children = items
     
     result = {
-        'size': total_size,
-        'path': str(path.relative_to(root_path))
+        'size': total_size
     }
     if children:
         result['children'] = children
@@ -194,8 +191,8 @@ def create_html_chart(data, title, root_path):
     <script>
         const completeTree = {json.dumps(complete_tree)};
         const rootPath = '{title}';
-        let currentPath = '.';
-        let navigationHistory = ['.'];
+        let currentPathSegments = [];
+        let navigationHistory = [[]];
         function generateColor(index) {{
             // Bootstrap table-striped colors (alternating white and light gray)
             return index % 2 === 0 ? '#ffffff' : '#f8f9fa';
@@ -220,7 +217,7 @@ def create_html_chart(data, title, root_path):
             const breadcrumbDiv = document.getElementById('breadcrumb');
             breadcrumbDiv.innerHTML = '';
             
-            navigationHistory.forEach((path, index) => {{
+            navigationHistory.forEach((pathSegments, index) => {{
                 if (index > 0) {{
                     const separator = document.createElement('span');
                     separator.className = 'breadcrumb-separator';
@@ -230,8 +227,13 @@ def create_html_chart(data, title, root_path):
                 
                 const item = document.createElement('span');
                 item.className = 'breadcrumb-item';
-                const displayPath = path === '.' ? rootPath : rootPath + '/' + path;
-                item.textContent = index === 0 ? displayPath.split('/').pop() || displayPath : path.split('/').pop() || path;
+                if (index === 0) {{
+                    // Root directory
+                    item.textContent = rootPath.split('/').pop() || rootPath;
+                }} else {{
+                    // Show the last segment name
+                    item.textContent = pathSegments[pathSegments.length - 1];
+                }}
                 item.onclick = () => navigateToHistoryIndex(index);
                 breadcrumbDiv.appendChild(item);
             }});
@@ -240,21 +242,22 @@ def create_html_chart(data, title, root_path):
         function navigateToHistoryIndex(index) {{
             if (index < navigationHistory.length - 1) {{
                 navigationHistory = navigationHistory.slice(0, index + 1);
-                currentPath = navigationHistory[index];
+                currentPathSegments = [...navigationHistory[index]];
                 
                 // Find directory in tree and update chart
-                const directoryData = findDirectoryInTree(completeTree, currentPath);
+                const directoryData = findDirectoryByNamePath(completeTree, currentPathSegments);
                 if (directoryData) {{
                     currentData = directoryData.children || [];
                     renderChart();
                 }}
                 
-                const displayPath = currentPath === '.' ? rootPath : rootPath + '/' + currentPath;
+                const displayPath = pathSegmentsToString(currentPathSegments);
                 document.getElementById('current-path').textContent = displayPath;
                 updateBreadcrumb();
                 
                 // Update browser history
-                history.replaceState({{ path: currentPath }}, '', `#${{encodeURIComponent(currentPath)}}`);
+                const hashPath = pathSegmentsToHash(currentPathSegments);
+                history.replaceState({{ pathSegments: currentPathSegments }}, '', `#${{encodeURIComponent(hashPath)}}`);
             }}
         }}
         
@@ -275,8 +278,8 @@ def create_html_chart(data, title, root_path):
                 bar.style.backgroundColor = generateColor(index);
                 
                 // Add click handler for directories
-                if (isDirectory && item.path) {{
-                    bar.onclick = () => navigateToDirectory(item.path, item.name);
+                if (isDirectory) {{
+                    bar.onclick = () => navigateToDirectory(item.name);
                 }}
                 
                 const text = document.createElement('div');
@@ -288,38 +291,52 @@ def create_html_chart(data, title, root_path):
             }});
         }}
         
-        function findDirectoryInTree(tree, targetPath) {{
-            if (tree.path === targetPath) {{
-                return tree;
+        function findDirectoryByNamePath(tree, nameSegments) {{
+            let current = tree;
+            
+            for (const segment of nameSegments) {{
+                if (!current.children) return null;
+                current = current.children.find(child => child.name === segment);
+                if (!current) return null;
             }}
             
-            for (const child of tree.children || []) {{
-                if (child.children && child.children.length > 0) {{
-                    const found = findDirectoryInTree(child, targetPath);
-                    if (found) return found;
-                }}
-            }}
-            return null;
+            return current;
+        }}
+        
+        function pathSegmentsToString(segments) {{
+            return segments.length === 0 ? rootPath : rootPath + '/' + segments.join('/');
+        }}
+        
+        function pathSegmentsToHash(segments) {{
+            return segments.length === 0 ? '.' : segments.join('/');
+        }}
+        
+        function hashToPathSegments(hash) {{
+            if (hash === '.' || hash === '') return [];
+            return hash.split('/').filter(segment => segment !== '');
         }}
         
         
-        function navigateToDirectory(path, name) {{
-            console.log('Navigating to:', path);
+        function navigateToDirectory(name) {{
+            console.log('Navigating to:', name);
+            
+            // Build new path segments
+            const newPathSegments = [...currentPathSegments, name];
             
             // Find directory in embedded tree
-            const directoryData = findDirectoryInTree(completeTree, path);
+            const directoryData = findDirectoryByNamePath(completeTree, newPathSegments);
             
             if (!directoryData) {{
-                alert(`Directory not found: ${{path}}`);
+                alert(`Directory not found: ${{name}}`);
                 return;
             }}
             
             // Add to navigation history
-            navigationHistory.push(path);
-            currentPath = path;
+            navigationHistory.push([...newPathSegments]);
+            currentPathSegments = newPathSegments;
             
             // Update display
-            const displayPath = path === '.' ? rootPath : rootPath + '/' + path;
+            const displayPath = pathSegmentsToString(currentPathSegments);
             document.getElementById('current-path').textContent = displayPath;
             updateBreadcrumb();
             
@@ -328,30 +345,30 @@ def create_html_chart(data, title, root_path):
             renderChart();
             
             // Add to browser history
-            history.pushState({{ path: path }}, '', `#${{encodeURIComponent(path)}}`);
+            const hashPath = pathSegmentsToHash(currentPathSegments);
+            history.pushState({{ pathSegments: currentPathSegments }}, '', `#${{encodeURIComponent(hashPath)}}`);
         }}
         
         // Handle browser back/forward buttons
         window.addEventListener('popstate', (event) => {{
-            if (event.state && event.state.path) {{
-                const targetPath = event.state.path;
+            if (event.state && event.state.pathSegments) {{
+                const targetSegments = event.state.pathSegments;
                 
                 // Find directory in tree
-                const directoryData = findDirectoryInTree(completeTree, targetPath);
+                const directoryData = findDirectoryByNamePath(completeTree, targetSegments);
                 if (directoryData) {{
                     // Update internal state to match browser history
-                    currentPath = targetPath;
+                    currentPathSegments = [...targetSegments];
                     
                     // Rebuild navigation history up to this point
-                    navigationHistory = ['.'];
-                    if (targetPath !== '.') {{
-                        // For simplicity, just add the target path
-                        // In a more sophisticated implementation, we'd rebuild the full path
-                        navigationHistory.push(targetPath);
+                    navigationHistory = [[]];
+                    if (targetSegments.length > 0) {{
+                        // For simplicity, just add the target segments
+                        navigationHistory.push([...targetSegments]);
                     }}
                     
                     // Update display
-                    const displayPath = targetPath === '.' ? rootPath : rootPath + '/' + targetPath;
+                    const displayPath = pathSegmentsToString(currentPathSegments);
                     document.getElementById('current-path').textContent = displayPath;
                     updateBreadcrumb();
                     currentData = directoryData.children || [];
@@ -365,15 +382,16 @@ def create_html_chart(data, title, root_path):
             // Check for initial hash in URL
             const hash = window.location.hash;
             if (hash.length > 1) {{
-                const initialPath = decodeURIComponent(hash.substring(1));
-                const directoryData = findDirectoryInTree(completeTree, initialPath);
+                const initialHash = decodeURIComponent(hash.substring(1));
+                const initialSegments = hashToPathSegments(initialHash);
+                const directoryData = findDirectoryByNamePath(completeTree, initialSegments);
                 if (directoryData) {{
-                    currentPath = initialPath;
-                    navigationHistory = ['.'];
-                    if (initialPath !== '.') {{
-                        navigationHistory.push(initialPath);
+                    currentPathSegments = [...initialSegments];
+                    navigationHistory = [[]];
+                    if (initialSegments.length > 0) {{
+                        navigationHistory.push([...initialSegments]);
                     }}
-                    const displayPath = initialPath === '.' ? rootPath : rootPath + '/' + initialPath;
+                    const displayPath = pathSegmentsToString(currentPathSegments);
                     document.getElementById('current-path').textContent = displayPath;
                     currentData = directoryData.children || [];
                 }}
@@ -383,7 +401,8 @@ def create_html_chart(data, title, root_path):
             renderChart();
             
             // Set initial browser history state
-            history.replaceState({{ path: currentPath }}, '', `#${{encodeURIComponent(currentPath)}}`);
+            const hashPath = pathSegmentsToHash(currentPathSegments);
+            history.replaceState({{ pathSegments: currentPathSegments }}, '', `#${{encodeURIComponent(hashPath)}}`);
         }});
     </script>
 </body>
