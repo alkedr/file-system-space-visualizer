@@ -17,43 +17,68 @@ def scan_directory_recursive(path, max_depth=3, current_depth=0):
                 elif item.is_dir() and not item.is_symlink():
                     # For max depth, just get the immediate directory size, don't recurse
                     size += sum(f.stat().st_size for f in item.rglob('*') if f.is_file() and not f.is_symlink())
-            return {'size': size, 'is_directory': True, 'path': str(path), 'children': {}}
+            return {'size': size, 'is_directory': True, 'path': str(path), 'children': []}
         except (PermissionError, OSError):
-            return {'size': 0, 'is_directory': True, 'path': str(path), 'children': {}}
+            return {'size': 0, 'is_directory': True, 'path': str(path), 'children': []}
     
-    data = {}
+    items = []
     total_size = 0
     
     for item in path.iterdir():
         try:
             if item.is_file() and not item.is_symlink():
                 file_size = item.stat().st_size
-                data[item.name] = {
+                items.append({
+                    'name': item.name,
                     'size': file_size,
                     'is_directory': False,
                     'path': str(item),
-                    'children': {}
-                }
+                    'children': []
+                })
                 total_size += file_size
             elif item.is_dir() and not item.is_symlink():
                 # Recursively scan subdirectory
                 subdir_data = scan_directory_recursive(item, max_depth, current_depth + 1)
-                data[item.name] = subdir_data
+                subdir_data['name'] = item.name
+                items.append(subdir_data)
                 total_size += subdir_data['size']
         except (PermissionError, OSError):
             continue
+    
+    # Sort by size (largest first)
+    items.sort(key=lambda x: x['size'], reverse=True)
+    
+    # Filter out very small items (less than 1% of total) and group into "Other"
+    if total_size > 0:
+        large_items = [item for item in items if item['size'] > total_size * 0.01]
+        small_items = [item for item in items if item['size'] <= total_size * 0.01]
+        
+        if small_items:
+            other_size = sum(item['size'] for item in small_items)
+            large_items.append({
+                'name': 'Other',
+                'size': other_size,
+                'is_directory': False,
+                'path': None,
+                'children': []
+            })
+        
+        children = large_items
+    else:
+        children = items
     
     return {
         'size': total_size,
         'is_directory': True,
         'path': str(path),
-        'children': data
+        'children': children
     }
 
 def scan_directory(path):
     """Scan directory and return immediate children (for compatibility)."""
     tree = scan_directory_recursive(path, max_depth=1)
-    return tree['children']
+    # Convert list back to dict for backward compatibility
+    return {item['name']: item for item in tree['children']}
 
 
 def format_size(bytes):
@@ -188,40 +213,7 @@ def create_html_chart(data, title, root_path):
             return `${{size.toFixed(1)}} ${{units[unitIndex]}}`;
         }}
         
-        function prepareChartData(directoryData) {{
-            if (!directoryData || !directoryData.children) return [];
-            
-            const items = Object.entries(directoryData.children).map(([name, info]) => ([
-                name, info.size, info.is_directory, info.path
-            ]));
-            
-            // Sort by size (largest first)
-            const sortedItems = items.sort((a, b) => b[1] - a[1]);
-            
-            // Filter out very small items (less than 1% of total)
-            const totalSize = sortedItems.reduce((sum, item) => sum + item[1], 0);
-            const largeItems = sortedItems.filter(item => item[1] > totalSize * 0.01);
-            
-            if (largeItems.length < sortedItems.length) {{
-                const otherSize = sortedItems
-                    .filter(item => item[1] <= totalSize * 0.01)
-                    .reduce((sum, item) => sum + item[1], 0);
-                largeItems.push(["Other", otherSize, false, null]);
-            }}
-            
-            // Convert to chart format - use totalSize instead of filteredTotal for correct percentages
-            return largeItems.map(([name, size, isDirectory, path], index) => ({{
-                name: name,
-                size: size,
-                formatted_size: formatSize(size),
-                percentage: (size / totalSize) * 100,
-                color_index: index,
-                is_directory: isDirectory,
-                path: path
-            }}));
-        }}
-        
-        let currentData = prepareChartData(completeTree);
+        let currentData = completeTree.children || [];
         
         function updateBreadcrumb() {{
             const breadcrumbDiv = document.getElementById('breadcrumb');
@@ -251,7 +243,7 @@ def create_html_chart(data, title, root_path):
                 // Find directory in tree and update chart
                 const directoryData = findDirectoryInTree(completeTree, currentPath);
                 if (directoryData) {{
-                    currentData = prepareChartData(directoryData);
+                    currentData = directoryData.children || [];
                     renderChart();
                 }}
                 
@@ -262,18 +254,18 @@ def create_html_chart(data, title, root_path):
         
         function renderChart() {{
             const container = document.getElementById('chart-container');
-            const containerHeight = container.clientHeight;
             container.innerHTML = '';
+            
+            // Calculate total size for percentage calculations
+            const totalSize = currentData.reduce((sum, item) => sum + item.size, 0);
             
             currentData.forEach((item, index) => {{
                 const bar = document.createElement('div');
                 bar.className = 'bar' + (item.is_directory ? ' clickable' : '');
                 
-                const heightPercent = item.percentage;
-                const height = (heightPercent / 100) * containerHeight;
-                
-                bar.style.height = height + 'px';
-                bar.style.backgroundColor = generateColor(item.color_index);
+                const percentage = totalSize > 0 ? (item.size / totalSize) * 100 : 0;
+                bar.style.height = percentage + '%';
+                bar.style.backgroundColor = generateColor(index);
                 
                 // Add click handler for directories
                 if (item.is_directory && item.path) {{
@@ -282,7 +274,7 @@ def create_html_chart(data, title, root_path):
                 
                 const text = document.createElement('div');
                 text.className = 'bar-text';
-                text.textContent = `${{item.percentage.toFixed(1)}}% (${{item.formatted_size}}) - ${{item.name}}`;
+                text.textContent = `${{percentage.toFixed(1)}}% (${{formatSize(item.size)}}) - ${{item.name}}`;
                 
                 bar.appendChild(text);
                 container.appendChild(bar);
@@ -294,7 +286,7 @@ def create_html_chart(data, title, root_path):
                 return tree;
             }}
             
-            for (const [name, child] of Object.entries(tree.children)) {{
+            for (const child of tree.children) {{
                 if (child.is_directory) {{
                     const found = findDirectoryInTree(child, targetPath);
                     if (found) return found;
@@ -324,17 +316,13 @@ def create_html_chart(data, title, root_path):
             updateBreadcrumb();
             
             // Update chart data
-            currentData = prepareChartData(directoryData);
+            currentData = directoryData.children || [];
             renderChart();
         }}
         
         // Initial render
         window.addEventListener('load', () => {{
             updateBreadcrumb();
-            renderChart();
-        }});
-        
-        window.addEventListener('resize', () => {{
             renderChart();
         }});
     </script>
