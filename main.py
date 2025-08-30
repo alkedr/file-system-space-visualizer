@@ -249,6 +249,9 @@ def create_html_chart(data, title, root_path):
                 
                 document.getElementById('current-path').textContent = currentPath;
                 updateBreadcrumb();
+                
+                // Update browser history
+                history.replaceState({{ path: currentPath }}, '', `#${{encodeURIComponent(currentPath)}}`);
             }}
         }}
         
@@ -318,12 +321,62 @@ def create_html_chart(data, title, root_path):
             // Update chart data
             currentData = directoryData.children || [];
             renderChart();
+            
+            // Add to browser history
+            history.pushState({{ path: path }}, '', `#${{encodeURIComponent(path)}}`);
         }}
+        
+        // Handle browser back/forward buttons
+        window.addEventListener('popstate', (event) => {{
+            if (event.state && event.state.path) {{
+                const targetPath = event.state.path;
+                
+                // Find directory in tree
+                const directoryData = findDirectoryInTree(completeTree, targetPath);
+                if (directoryData) {{
+                    // Update internal state to match browser history
+                    currentPath = targetPath;
+                    
+                    // Rebuild navigation history up to this point
+                    navigationHistory = ['{title}'];
+                    if (targetPath !== '{title}') {{
+                        // For simplicity, just add the target path
+                        // In a more sophisticated implementation, we'd rebuild the full path
+                        navigationHistory.push(targetPath);
+                    }}
+                    
+                    // Update display
+                    document.getElementById('current-path').textContent = targetPath;
+                    updateBreadcrumb();
+                    currentData = directoryData.children || [];
+                    renderChart();
+                }}
+            }}
+        }});
         
         // Initial render
         window.addEventListener('load', () => {{
+            // Check for initial hash in URL
+            const hash = window.location.hash;
+            if (hash.length > 1) {{
+                const initialPath = decodeURIComponent(hash.substring(1));
+                const directoryData = findDirectoryInTree(completeTree, initialPath);
+                if (directoryData) {{
+                    currentPath = initialPath;
+                    navigationHistory = ['{title}'];
+                    if (initialPath !== '{title}') {{
+                        navigationHistory.push(initialPath);
+                    }}
+                    document.getElementById('current-path').textContent = initialPath;
+                    currentData = directoryData.children || [];
+                }}
+            }}
+            
             updateBreadcrumb();
             renderChart();
+            
+            // Set initial browser history state
+            history.replaceState({{ path: currentPath }}, '', `#${{encodeURIComponent(currentPath)}}`);
         }});
     </script>
 </body>
