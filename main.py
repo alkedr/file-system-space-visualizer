@@ -113,6 +113,10 @@ def create_html_chart(data, title, root_path):
             padding: 0;
             font-family: Arial, sans-serif;
             background-color: white;
+            height: 100vh;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
         }}
         
         .title {{
@@ -121,12 +125,22 @@ def create_html_chart(data, title, root_path):
             font-weight: bold;
             padding: 10px 0;
             margin: 0;
+            flex-shrink: 0;
+        }}
+        
+        .breadcrumb {{
+            background-color: #f0f0f0;
+            padding: 10px;
+            font-size: 12px;
+            border-bottom: 1px solid #ddd;
+            flex-shrink: 0;
         }}
         
         .chart-container {{
             width: 100%;
-            height: calc(100vh - 50px);
+            flex: 1;
             position: relative;
+            overflow: hidden;
         }}
         
         .bar {{
@@ -153,13 +167,6 @@ def create_html_chart(data, title, root_path):
             color: black;
             z-index: 10;
             white-space: nowrap;
-        }}
-        
-        .breadcrumb {{
-            background-color: #f0f0f0;
-            padding: 10px;
-            font-size: 12px;
-            border-bottom: 1px solid #ddd;
         }}
         
         .breadcrumb-item {{
