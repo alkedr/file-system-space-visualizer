@@ -17,9 +17,9 @@ def scan_directory_recursive(path, max_depth=3, current_depth=0):
                 elif item.is_dir() and not item.is_symlink():
                     # For max depth, just get the immediate directory size, don't recurse
                     size += sum(f.stat().st_size for f in item.rglob('*') if f.is_file() and not f.is_symlink())
-            return {'size': size, 'is_directory': True, 'path': str(path), 'children': []}
+            return {'size': size, 'path': str(path), 'children': []}
         except (PermissionError, OSError):
-            return {'size': 0, 'is_directory': True, 'path': str(path), 'children': []}
+            return {'size': 0, 'path': str(path), 'children': []}
     
     items = []
     total_size = 0
@@ -31,7 +31,6 @@ def scan_directory_recursive(path, max_depth=3, current_depth=0):
                 items.append({
                     'name': item.name,
                     'size': file_size,
-                    'is_directory': False,
                     'path': str(item),
                     'children': []
                 })
@@ -58,7 +57,6 @@ def scan_directory_recursive(path, max_depth=3, current_depth=0):
             large_items.append({
                 'name': 'Other',
                 'size': other_size,
-                'is_directory': False,
                 'path': None,
                 'children': []
             })
@@ -69,7 +67,6 @@ def scan_directory_recursive(path, max_depth=3, current_depth=0):
     
     return {
         'size': total_size,
-        'is_directory': True,
         'path': str(path),
         'children': children
     }
@@ -264,14 +261,15 @@ def create_html_chart(data, title, root_path):
             
             currentData.forEach((item, index) => {{
                 const bar = document.createElement('div');
-                bar.className = 'bar' + (item.is_directory ? ' clickable' : '');
+                const isDirectory = item.children && item.children.length > 0;
+                bar.className = 'bar' + (isDirectory ? ' clickable' : '');
                 
                 const percentage = totalSize > 0 ? (item.size / totalSize) * 100 : 0;
                 bar.style.height = percentage + '%';
                 bar.style.backgroundColor = generateColor(index);
                 
                 // Add click handler for directories
-                if (item.is_directory && item.path) {{
+                if (isDirectory && item.path) {{
                     bar.onclick = () => navigateToDirectory(item.path, item.name);
                 }}
                 
@@ -290,7 +288,7 @@ def create_html_chart(data, title, root_path):
             }}
             
             for (const child of tree.children) {{
-                if (child.is_directory) {{
+                if (child.children && child.children.length > 0) {{
                     const found = findDirectoryInTree(child, targetPath);
                     if (found) return found;
                 }}
