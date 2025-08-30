@@ -189,7 +189,7 @@ def create_html_chart(data, title, root_path):
     <div class="chart-container" id="chart-container"></div>
     
     <script>
-        const completeTree = {json.dumps(complete_tree)};
+        const completeTree = {json.dumps(complete_tree, separators=(',', ':'))};
         const rootPath = '{title}';
         let currentPathSegments = [];
         let navigationHistory = [[]];
