@@ -8,9 +8,15 @@ import json
 def scan_directory_recursive(path, max_depth=3, current_depth=0):
     """Recursively scan directory tree and return complete structure."""
     if current_depth >= max_depth:
-        # Just return size for very deep directories
+        # Just return size for very deep directories - avoid rglob to prevent double counting
         try:
-            size = sum(f.stat().st_size for f in path.rglob('*') if f.is_file())
+            size = 0
+            for item in path.iterdir():
+                if item.is_file() and not item.is_symlink():
+                    size += item.stat().st_size
+                elif item.is_dir() and not item.is_symlink():
+                    # For max depth, just get the immediate directory size, don't recurse
+                    size += sum(f.stat().st_size for f in item.rglob('*') if f.is_file() and not f.is_symlink())
             return {'size': size, 'is_directory': True, 'path': str(path), 'children': {}}
         except (PermissionError, OSError):
             return {'size': 0, 'is_directory': True, 'path': str(path), 'children': {}}
@@ -20,7 +26,7 @@ def scan_directory_recursive(path, max_depth=3, current_depth=0):
     
     for item in path.iterdir():
         try:
-            if item.is_file():
+            if item.is_file() and not item.is_symlink():
                 file_size = item.stat().st_size
                 data[item.name] = {
                     'size': file_size,
@@ -29,7 +35,7 @@ def scan_directory_recursive(path, max_depth=3, current_depth=0):
                     'children': {}
                 }
                 total_size += file_size
-            elif item.is_dir():
+            elif item.is_dir() and not item.is_symlink():
                 # Recursively scan subdirectory
                 subdir_data = scan_directory_recursive(item, max_depth, current_depth + 1)
                 data[item.name] = subdir_data
